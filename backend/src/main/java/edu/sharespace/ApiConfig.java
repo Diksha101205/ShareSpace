@@ -47,7 +47,7 @@ public class ApiConfig implements WebMvcConfigurer {
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/**")
                 .allowedOrigins(
-                        "https://share-space-xi.vercel.app"
+                        "https://share-space-b7jvs7uil-dikshatanwar56-5043.vercel.app/"
                 )
                 .allowedMethods(
                         "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"
