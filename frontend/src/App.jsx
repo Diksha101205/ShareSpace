@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom';
-import { Activity, AlertTriangle, ArrowRight, ArrowUpRight, CalendarDays, Check, Clock3, Grid2X2, HelpCircle, Home, MapPin, Menu, Plus, Search, Settings, ShieldCheck, SlidersHorizontal, Sparkles, X } from 'lucide-react';
+import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Activity, AlertTriangle, ArrowRight, ArrowUpRight, CalendarDays, Check, Clock3, Grid2X2, HelpCircle, Home, LogOut, MapPin, Menu, Plus, Search, Settings, ShieldCheck, SlidersHorizontal, Sparkles, X } from 'lucide-react';
+import { useAuth } from './AuthContext.jsx';
+import { auth } from './firebase.js';
+import { authErrorMessage, authRouteState } from './authState.js';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
 const cx = (...values) => values.filter(Boolean).join(' ');
@@ -8,18 +11,45 @@ const activeStatuses = new Set(['PENDING','APPROVED','WAITLISTED','CHECKED_OUT',
 const localDateTime = date => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0,16);
 async function api(path, options = {}) {
   let response;
-  try { response = await fetch(API + path, { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options }); }
+  let token = null;
+  try { token = auth?.currentUser ? await auth.currentUser.getIdToken() : null; }
+  catch { throw new Error('Your Firebase sign-in could not be refreshed. Sign in again and retry.'); }
+  try {
+    response = await fetch(API + path, { ...options, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(options.headers || {}) } });
+  }
   catch { throw new Error('Unable to connect to ShareSpace. Check your connection and retry.'); }
   if (!response.ok) {
     let message = 'Request failed (' + response.status + ')';
     try { const body = await response.json(); message = body.message || body.detail || body.error || message; if (body.errors) message = Object.values(body.errors).flat().join(' '); } catch { /* Non-JSON response. */ }
-    if (response.status === 401) message = 'Sign-in is required, but account authentication is not currently configured.';
+    if (response.status === 401) message = 'Your sign-in has expired or is invalid. Sign in again to continue.';
+    if (response.status === 503) message = 'The ShareSpace identity service is not configured yet. Contact the application administrator.';
     const error = new Error(message); error.status = response.status; throw error;
   }
   return response.status === 204 ? null : response.json();
 }
 
 function App() {
+  const session = useAuth();
+  const location = useLocation();
+  const gate = authRouteState({ ...session, pathname: location.pathname });
+  if (gate.view === 'loading') return <div className="auth-loading" role="status">Restoring your secure session…</div>;
+  if (gate.view === 'auth') {
+    return <Routes>
+      <Route path="/login" element={<AuthScreen mode="login"/>}/>
+      <Route path="/register" element={<AuthScreen mode="register"/>}/>
+      <Route path="/forgot-password" element={<AuthScreen mode="forgot"/>}/>
+      <Route path="*" element={<Navigate to="/login" replace state={{ from: location }}/>} />
+    </Routes>;
+  }
+  if (gate.view === 'redirect-login') return <Navigate to="/login" replace state={{ from: location }}/>;
+  if (gate.view === 'redirect-workspace') {
+    const destination = location.state?.from;
+    return <Navigate to={destination ? `${destination.pathname || '/'}${destination.search || ''}${destination.hash || ''}` : '/'} replace/>;
+  }
+  return <Workspace session={session}/>;
+}
+
+function Workspace({session}) {
   const [resources,setResources]=useState([]),[bookings,setBookings]=useState([]),[incidents,setIncidents]=useState([]),[events,setEvents]=useState([]),[user,setUser]=useState(null);
   const [dataErrors,setDataErrors]=useState({}),[connection,setConnection]=useState(null),[actionError,setActionError]=useState(''),[notice,setNotice]=useState(''),[navOpen,setNavOpen]=useState(false),[busy,setBusy]=useState(false);
   const lock=useRef(false);
@@ -53,12 +83,14 @@ function App() {
         <NavLink to="/help" className={({isActive})=>cx('nav-item',isActive&&'selected')} onClick={()=>setNavOpen(false)}><HelpCircle size={18}/>Help centre</NavLink>
       </nav>
       <div className="sidebar-bottom"><NavLink to="/help" className="help-card"><span className="help-icon"><HelpCircle size={18}/></span><b>Need a hand?</b><span className="help-copy">Guidance for sharing campus resources.</span><span className="help-link">Visit Help Centre <ArrowRight size={13}/></span></NavLink>
-        <NavLink to="/settings" className="profile profile-link"><span className="avatar">{user?.fullName?user.fullName.split(' ').map(x=>x[0]).join('').slice(0,2):'?'}</span><span className="profile-info"><b>{user?.fullName||'Account details unavailable'}</b><small>{user?.email||'Sign-in is not configured'}</small></span><Settings size={17}/></NavLink>
+        <NavLink to="/settings" className="profile profile-link"><span className="avatar">{user?.fullName?user.fullName.split(' ').map(x=>x[0]).join('').slice(0,2):'?'}</span><span className="profile-info"><b>{user?.fullName||'Account details unavailable'}</b><small>{user?.email||session.user.email||'Signed in'}</small></span><Settings size={17}/></NavLink>
+        <button type="button" className="profile-signout" onClick={() => session.logout()}><LogOut size={15}/>Sign out</button>
       </div>
     </aside>
     {navOpen&&<div className="scrim" onClick={()=>setNavOpen(false)}/>}
     <main className="main"><header className="topbar"><button className="icon-button menu-button" onClick={()=>setNavOpen(true)} aria-label="Open navigation"><Menu size={20}/></button><div className="crumb">ShareSpace <span>/</span> <strong>Campus resources</strong></div><div className="top-actions"><span className={cx('connection-chip',connection===false?'connection-error':connection===true?'connection-ok':'connection-loading')}><i/>{connection===false?'Connection unavailable':connection===true?'Campus library':'Connecting…'}</span><NavLink className="icon-button account-button" to="/settings" aria-label="Account settings"><Settings size={18}/></NavLink></div></header>
       {dataErrors.resources&&<div className="backend-note" role="alert"><span><AlertTriangle size={16}/></span><div><b>Unable to load resources</b><small>{dataErrors.resources}</small></div><button onClick={refresh} className="note-retry">Retry</button></div>}
+      {session.registrationNotice&&<div className="backend-note" role="status"><span><Check size={16}/></span><div><b>Email verification</b><small>{session.registrationNotice}</small></div><button onClick={session.dismissRegistrationNotice} className="note-retry">Dismiss</button></div>}
       {actionError&&<div className="backend-note action-note" role="alert"><span><AlertTriangle size={16}/></span><div><b>Action could not be completed</b><small>{actionError}</small></div><button onClick={()=>setActionError('')} className="note-retry">Dismiss</button></div>}
       <div className="page-wrap"><Routes>
         <Route path="/" element={<Dashboard {...props}/>}/><Route path="/discover" element={<Discover {...props}/>}/><Route path="/resources/new" element={<ResourceForm {...props}/>}/><Route path="/resources/:id" element={<ResourceDetail {...props}/>}/>
@@ -67,6 +99,70 @@ function App() {
     </main>{notice&&<div className="toast" role="status"><Check size={17}/>{notice}</div>}
   </div>;
 }
+function AuthScreen({mode}) {
+  const session = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const registering = mode === 'register';
+  const forgot = mode === 'forgot';
+  const returnPath = location.state?.from;
+  const destination = returnPath ? `${returnPath.pathname || '/'}${returnPath.search || ''}${returnPath.hash || ''}` : '/';
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setError(''); setMessage('');
+    if (!session.configured) { setError('Firebase is not configured. Copy frontend/.env.example to frontend/.env.local and add your Firebase web app values.'); return; }
+    if (registering && name.trim().length < 2) { setError('Enter your name (at least 2 characters).'); return; }
+    if (registering && password !== confirm) { setError('The passwords do not match.'); return; }
+    setBusy(true);
+    try {
+      if (forgot) {
+        await session.resetPassword(email);
+        setMessage('If this address has a ShareSpace account, Firebase has sent a password reset email.');
+      } else if (registering) {
+        const result = await session.register(name, email, password);
+        setMessage(result.verificationEmailSent ? 'Account created. Check your email for a verification link.' : 'Account created, but Firebase could not send a verification email.');
+        navigate(destination, { replace: true });
+      } else {
+        await session.login(email, password);
+        navigate(destination, { replace: true });
+      }
+    } catch (authError) {
+      setError(authErrorMessage(authError.code));
+    } finally { setBusy(false); }
+  };
+
+  return <main className="auth-page"><section className="auth-card">
+    <NavLink className="auth-brand" to="/login"><span className="brand-mark"><Grid2X2 size={19}/></span><span>share<span>space</span></span></NavLink>
+    <div className="eyebrow">CAMPUS RESOURCE LIBRARY</div>
+    <h1>{forgot ? 'Reset your password' : registering ? 'Create your account' : 'Welcome back'}</h1>
+    <p className="auth-intro">{forgot ? 'We’ll email you a secure link to reset your password.' : registering ? 'Create a ShareSpace account to request and manage campus resources.' : 'Sign in to continue to your campus resources.'}</p>
+    {!session.configured && <p className="auth-alert" role="alert">Firebase web configuration is missing. Add the values shown in <code>frontend/.env.example</code> to <code>frontend/.env.local</code>, then restart Vite.</p>}
+    {error && <p className="auth-error" role="alert">{error}</p>}
+    {message && <p className="auth-success" role="status">{message}</p>}
+    <form className="auth-form" onSubmit={submit}>
+      {registering && <label>Full name<input autoComplete="name" required minLength={2} value={name} onChange={e=>setName(e.target.value)} disabled={busy}/></label>}
+      <label>Email address<input type="email" autoComplete="email" required value={email} onChange={e=>setEmail(e.target.value)} disabled={busy}/></label>
+      {!forgot && <label>Password<input type="password" autoComplete={registering?'new-password':'current-password'} minLength={6} required value={password} onChange={e=>setPassword(e.target.value)} disabled={busy}/></label>}
+      {registering && <label>Confirm password<input type="password" autoComplete="new-password" minLength={6} required value={confirm} onChange={e=>setConfirm(e.target.value)} disabled={busy}/></label>}
+      <button className="btn btn-primary auth-submit" disabled={busy||!session.configured}>{busy?'Please wait…':forgot?'Send reset link':registering?'Create account':'Sign in'}<ArrowRight size={16}/></button>
+    </form>
+    <nav className="auth-links" aria-label="Account options">
+      {mode !== 'login' && <NavLink to="/login" state={location.state}>Sign in</NavLink>}
+      {mode !== 'register' && !forgot && <NavLink to="/register" state={location.state}>Create account</NavLink>}
+      {mode === 'login' && <NavLink to="/forgot-password" state={location.state}>Forgot password?</NavLink>}
+    </nav>
+    <p className="auth-footnote">Your account is secured by Firebase. ShareSpace access and permissions are checked by the backend.</p>
+  </section></main>;
+}
+
 function PageHead({eyebrow,title,description,action}){return <div className="page-head"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{description}</p></div>{action}</div>;}
 function LoadMessage({message}){return <div className="load-message" role="status">{message}</div>;}
 function Dashboard(p){

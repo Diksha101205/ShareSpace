@@ -6,11 +6,15 @@ Base URL: `http://localhost:8080/api`. JSON timestamps are ISO-8601 strings with
 {"timestamp":"2026-10-28T12:00:00Z","status":409,"error":"Conflict","message":"Only approved bookings can be checked in","path":"/api/bookings/15/check-in","fields":{}}
 ```
 
-Validation errors return `400` with `fields` mapping property names to validation messages. Other common statuses: `401` unauthenticated/demo mode disabled, `403` not permitted, `404` missing record, `409` conflict or invalid state transition. Malformed JSON returns Spring's standard `400` response.
+Validation errors return `400` with `fields` mapping property names to validation messages. Other common statuses: `401` missing/invalid Firebase bearer token, `403` authenticated but not permitted, `404` missing record, `409` conflict or invalid state transition, and `503` when backend Firebase verification is not configured. Malformed JSON returns Spring's standard `400` response.
 
-## Identity and access
+## Authentication and access
 
-`DEMO_MODE` is **false by default**. No production authentication provider is implemented yet. Protected operations return 401 until one is integrated. For local-only demo, set both `DEMO_MODE=true` and `SEED_DEMO_DATA=true`, then send `X-Demo-User` as exactly one of `taylor@campus.edu`, `maya@campus.edu`, or `admin@campus.edu`. This header is not authentication and must never be enabled on an exposed deployment. The roles are assigned in backend seed data; clients cannot choose a role. `GET /resources` and `GET /resources/{id}` are public discovery endpoints. All booking and incident data endpoints require a valid demo identity and enforce record-level permissions in the service.
+Account registration, sign-in, sign-out, and password reset are handled by Firebase Authentication in the frontend. The frontend sends the current Firebase ID token on protected API requests as `Authorization: Bearer <Firebase-ID-token>`. The backend verifies the signature, issuer, audience/project, and expiration with the Firebase Admin SDK; it never treats a client-supplied user ID, email, or role as identity. Protected endpoints return `401 Unauthorized` when the token is missing or invalid and `403 Forbidden` for an authenticated user without permission. `GET /health`, `GET /resources`, and `GET /resources/{id}` remain public.
+
+The backend provisions an ordinary `USER` profile after verifying a Firebase token. Verified email can link an existing ordinary profile idempotently; UID and email uniqueness plus a database transaction protect first login. Elevated `OWNER` and `ADMIN` profiles cannot be claimed by self-registration: an administrator must provision their Firebase UID into the trusted `firebase_uid` field of the existing account. Firebase roles or registration form fields are never used to grant application roles. The former `X-Demo-User` identity header is no longer accepted.
+
+Firebase Admin is initialized only when `FIREBASE_PROJECT_ID` is configured. Credentials come from Google Application Default Credentials (for local development, `gcloud auth application-default login`) or `GOOGLE_APPLICATION_CREDENTIALS` pointing to a service-account file stored outside the repository. Never commit a service-account file. If Firebase is not configured, bearer-protected calls return `503`; anonymous calls to protected routes return `401`.
 
 ## Resources
 
@@ -115,7 +119,7 @@ Audit records expose `id`, nested `actor`, `action`, `entityType`, `entityId`, `
 
 ## CORS and local startup
 
-The default allowed browser origin is `http://localhost:5173`. Set `FRONTEND_ORIGIN` to the exact deployed frontend origin. Database configuration reads `DB_URL` (default `jdbc:postgresql://localhost:5432/sharespace_db`), `DB_USER` (default `sharespace`), and `DB_PASSWORD` (no default). `SERVER_PORT` defaults to 8080.
+The default allowed browser origin is `http://localhost:5173`. Set `FRONTEND_ORIGIN` to the exact deployed frontend origin. Database configuration reads `DB_URL` (default `jdbc:postgresql://localhost:5432/sharespace_db`), `DB_USER` (default `sharespace`), and `DB_PASSWORD`. Firebase configuration reads `FIREBASE_PROJECT_ID` and Google Application Default Credentials. `SERVER_PORT` defaults to 8080.
 
 PowerShell, from `backend/`:
 
@@ -125,8 +129,9 @@ $env:PATH="$env:JAVA_HOME\bin;$env:PATH"
 $env:DB_URL='jdbc:postgresql://localhost:5432/sharespace_db'
 $env:DB_USER='sharespace'
 $env:DB_PASSWORD='your-local-password'
-$env:DEMO_MODE='true' # localhost only
-$env:SEED_DEMO_DATA='true' # local fiction data only
+$env:FIREBASE_PROJECT_ID='your-firebase-project-id'
 $env:FRONTEND_ORIGIN='http://localhost:5173'
 & 'C:\Users\Diksh\.m2\wrapper\dists\apache-maven-3.9.16-bin\5grr65jo27hi51sujmtcldfovl\apache-maven-3.9.16\bin\mvn.cmd' spring-boot:run
 ```
+
+For the frontend, copy `frontend/.env.example` to `frontend/.env.local`, fill in the Firebase web app configuration values, and run `npm run dev`. In Firebase Console, enable **Email/Password** under Authentication → Sign-in method and add `localhost` (and the deployed UI hostname) under Authentication → Settings → Authorized domains. Test by registering, confirming the verification email, signing out and signing in, requesting a password reset, and calling `GET /api/users/me` with the bearer token from an authenticated browser session. Never send a Firebase token in a URL or log it.
