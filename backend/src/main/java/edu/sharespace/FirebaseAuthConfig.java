@@ -101,6 +101,5 @@ class FirebaseAuthConfig {
     FirebaseAuth firebaseAuth(FirebaseApp firebaseApp) {
         return FirebaseAuth.getInstance(firebaseApp);
     }
-```
 
 }
