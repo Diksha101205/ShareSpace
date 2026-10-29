@@ -4,13 +4,14 @@ spring:
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/sharespace_db}
     username: ${DB_USER:postgres}
-    password: ${DB_PASSWORD:}
+    password: ${DB_PASSWORD:1510}
   jpa:
     hibernate:
       ddl-auto: update
     open-in-view: false
     properties:
       hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
         jdbc.time_zone: UTC
   jackson:
     serialization:
