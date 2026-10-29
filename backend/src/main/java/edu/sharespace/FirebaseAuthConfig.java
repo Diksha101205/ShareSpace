@@ -41,3 +41,66 @@ class FirebaseAuthConfig {
         return FirebaseAuth.getInstance(firebaseApp);
     }
 }
+package edu.sharespace;
+
+import com.google.auth.oauth2.GoogleCredentials;
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.FirebaseOptions;
+import com.google.firebase.auth.FirebaseAuth;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+
+@Configuration
+@ConditionalOnExpression("!'${app.firebase.project-id:}'.isEmpty()")
+class FirebaseAuthConfig {
+
+```
+    private static final Logger log = LoggerFactory.getLogger(FirebaseAuthConfig.class);
+
+    @Bean
+    FirebaseApp firebaseApp(
+            @Value("${app.firebase.project-id}") String projectId,
+            @Value("${FIREBASE_SERVICE_ACCOUNT_JSON:}") String serviceAccountJson
+    ) throws IOException {
+
+        GoogleCredentials credentials;
+
+        if (serviceAccountJson != null && !serviceAccountJson.isBlank()) {
+            credentials = GoogleCredentials.fromStream(
+                    new ByteArrayInputStream(
+                            serviceAccountJson.getBytes(StandardCharsets.UTF_8)
+                    )
+            );
+
+            log.info("Firebase Admin initialized using Render service account credentials.");
+
+        } else {
+            credentials = GoogleCredentials.getApplicationDefault();
+
+            log.info("Firebase Admin initialized using Application Default Credentials.");
+        }
+
+        return FirebaseApp.initializeApp(
+                FirebaseOptions.builder()
+                        .setCredentials(credentials)
+                        .setProjectId(projectId)
+                        .build(),
+                "sharespace"
+        );
+    }
+
+    @Bean
+    FirebaseAuth firebaseAuth(FirebaseApp firebaseApp) {
+        return FirebaseAuth.getInstance(firebaseApp);
+    }
+```
+
+}
