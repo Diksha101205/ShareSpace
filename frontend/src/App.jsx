@@ -1,28 +1,52 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Activity, AlertTriangle, ArrowRight, ArrowUpRight, CalendarDays, Check, Clock3, Grid2X2, HelpCircle, Home, LogOut, MapPin, Menu, Plus, Search, Settings, ShieldCheck, SlidersHorizontal, Sparkles, X } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowRight, ArrowUpRight, CalendarDays, Check, Clock3, Grid2X2, HelpCircle, Home, Info, KeyRound, LogOut, MapPin, Menu, Monitor, Plus, Search, Settings, ShieldCheck, SlidersHorizontal, Sparkles, Sun, Moon, UserRound, X } from 'lucide-react';
 import { useAuth } from './AuthContext.jsx';
 import { auth } from './firebase.js';
-import { authErrorMessage, authRouteState } from './authState.js';
+import { signOut } from 'firebase/auth';
+import { apiErrorMessage, authErrorMessage, authRouteState } from './authState.js';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
 const cx = (...values) => values.filter(Boolean).join(' ');
 const activeStatuses = new Set(['PENDING','APPROVED','WAITLISTED','CHECKED_OUT','RETURN_PENDING_CONFIRMATION','OVERDUE']);
 const localDateTime = date => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0,16);
 async function api(path, options = {}) {
-  let response;
-  let token = null;
-  try { token = auth?.currentUser ? await auth.currentUser.getIdToken() : null; }
-  catch { throw new Error('Your Firebase sign-in could not be refreshed. Sign in again and retry.'); }
-  try {
-    response = await fetch(API + path, { ...options, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(options.headers || {}) } });
+  const currentUser = auth?.currentUser;
+  const request = async (forceRefresh = false) => {
+    let token = null;
+    if (currentUser) {
+      try { token = await currentUser.getIdToken(forceRefresh); }
+      catch (error) {
+        if (error?.code === 'auth/network-request-failed') throw new Error('Unable to refresh your Firebase session because the network is unavailable. Check your connection and retry.');
+        if (['auth/user-token-expired', 'auth/invalid-user-token', 'auth/user-disabled'].includes(error?.code)) {
+          try { await signOut(auth); } catch { /* Auth state listener still handles a completed sign-out. */ }
+          throw new Error('Your Firebase session has expired or was revoked. Sign in again to continue.');
+        }
+        throw new Error('Firebase could not provide a valid sign-in token. Sign in again and retry.');
+      }
+    }
+    let response;
+    try {
+      response = await fetch(API + path, {
+        ...options,
+        headers: { ...(options.headers || {}), 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+    } catch {
+      throw new Error('Unable to connect to ShareSpace. Check your connection and retry.');
+    }
+    return { response, token };
+  };
+
+  let { response, token } = await request();
+  let refreshed = false;
+  if (response.status === 401 && currentUser) {
+    refreshed = true;
+    ({ response, token } = await request(true));
   }
-  catch { throw new Error('Unable to connect to ShareSpace. Check your connection and retry.'); }
   if (!response.ok) {
-    let message = 'Request failed (' + response.status + ')';
-    try { const body = await response.json(); message = body.message || body.detail || body.error || message; if (body.errors) message = Object.values(body.errors).flat().join(' '); } catch { /* Non-JSON response. */ }
-    if (response.status === 401) message = 'Your sign-in has expired or is invalid. Sign in again to continue.';
-    if (response.status === 503) message = 'The ShareSpace identity service is not configured yet. Contact the application administrator.';
+    let body = {};
+    try { body = await response.json(); } catch { /* Non-JSON response. */ }
+    const message = apiErrorMessage(response.status, body, { hasToken: Boolean(token), refreshed });
     const error = new Error(message); error.status = response.status; throw error;
   }
   return response.status === 204 ? null : response.json();
@@ -31,13 +55,31 @@ async function api(path, options = {}) {
 function App() {
   const session = useAuth();
   const location = useLocation();
+  const [theme, setTheme] = useState(() => {
+    try {
+      const saved = localStorage.getItem('sharespace-theme');
+      return ['light', 'dark', 'system'].includes(saved) ? saved : 'system';
+    } catch { return 'system'; }
+  });
+  useEffect(() => {
+    const root = document.documentElement;
+    const media = window.matchMedia('(prefers-color-scheme: light)');
+    const apply = () => { root.dataset.theme = theme === 'system' ? (media.matches ? 'light' : 'dark') : theme; };
+    apply();
+    media.addEventListener?.('change', apply);
+    return () => media.removeEventListener?.('change', apply);
+  }, [theme]);
+  const changeTheme = (nextTheme) => {
+    try { localStorage.setItem('sharespace-theme', nextTheme); } catch { /* Theme still changes for this session. */ }
+    setTheme(nextTheme);
+  };
   const gate = authRouteState({ ...session, pathname: location.pathname });
   if (gate.view === 'loading') return <div className="auth-loading" role="status">Restoring your secure session…</div>;
   if (gate.view === 'auth') {
     return <Routes>
-      <Route path="/login" element={<AuthScreen mode="login"/>}/>
-      <Route path="/register" element={<AuthScreen mode="register"/>}/>
-      <Route path="/forgot-password" element={<AuthScreen mode="forgot"/>}/>
+      <Route path="/login" element={<AuthScreen mode="login" theme={theme} onThemeChange={changeTheme}/>}/>
+      <Route path="/register" element={<AuthScreen mode="register" theme={theme} onThemeChange={changeTheme}/>}/>
+      <Route path="/forgot-password" element={<AuthScreen mode="forgot" theme={theme} onThemeChange={changeTheme}/>}/>
       <Route path="*" element={<Navigate to="/login" replace state={{ from: location }}/>} />
     </Routes>;
   }
@@ -46,10 +88,11 @@ function App() {
     const destination = location.state?.from;
     return <Navigate to={destination ? `${destination.pathname || '/'}${destination.search || ''}${destination.hash || ''}` : '/'} replace/>;
   }
-  return <Workspace session={session}/>;
+  return <Workspace session={session} theme={theme} onThemeChange={changeTheme}/>;
 }
 
-function Workspace({session}) {
+function Workspace({session, theme, onThemeChange}) {
+  const navigate = useNavigate();
   const [resources,setResources]=useState([]),[bookings,setBookings]=useState([]),[incidents,setIncidents]=useState([]),[events,setEvents]=useState([]),[user,setUser]=useState(null);
   const [dataErrors,setDataErrors]=useState({}),[connection,setConnection]=useState(null),[actionError,setActionError]=useState(''),[notice,setNotice]=useState(''),[navOpen,setNavOpen]=useState(false),[busy,setBusy]=useState(false);
   const lock=useRef(false);
@@ -69,7 +112,14 @@ function Workspace({session}) {
     catch(error){setActionError(error.message);return false;}
     finally{setBusy(false);lock.current=false;}
   };
+  const logout=async()=>{
+    try { await session.logout(); navigate('/login',{replace:true}); }
+    catch { setActionError('ShareSpace could not complete sign out. Please try again.'); }
+  };
   const props={refresh,doAction,resources,bookings,incidents,events,user,dataErrors,busy};
+  const accountName=user?.fullName||session.user?.displayName||'';
+  const accountEmail=user?.email||session.user?.email||'';
+  const accountInitials=accountName ? accountName.split(' ').map(x=>x[0]).join('').slice(0,2) : accountEmail.slice(0,1).toUpperCase();
   return <div className="app-shell">
     <aside className={cx('sidebar',navOpen&&'sidebar-open')}>
       <div className="brand"><div className="brand-mark"><Grid2X2 size={19}/></div><span>share<span className="brand-light">space</span></span><button className="icon-button mobile-close" onClick={()=>setNavOpen(false)} aria-label="Close navigation"><X size={18}/></button></div>
@@ -83,23 +133,23 @@ function Workspace({session}) {
         <NavLink to="/help" className={({isActive})=>cx('nav-item',isActive&&'selected')} onClick={()=>setNavOpen(false)}><HelpCircle size={18}/>Help centre</NavLink>
       </nav>
       <div className="sidebar-bottom"><NavLink to="/help" className="help-card"><span className="help-icon"><HelpCircle size={18}/></span><b>Need a hand?</b><span className="help-copy">Guidance for sharing campus resources.</span><span className="help-link">Visit Help Centre <ArrowRight size={13}/></span></NavLink>
-        <NavLink to="/settings" className="profile profile-link"><span className="avatar">{user?.fullName?user.fullName.split(' ').map(x=>x[0]).join('').slice(0,2):'?'}</span><span className="profile-info"><b>{user?.fullName||'Account details unavailable'}</b><small>{user?.email||session.user.email||'Signed in'}</small></span><Settings size={17}/></NavLink>
-        <button type="button" className="profile-signout" onClick={() => session.logout()}><LogOut size={15}/>Sign out</button>
+        <NavLink to="/settings" className="profile profile-link"><span className="avatar">{session.user?.photoURL?<img src={session.user.photoURL} alt=""/>:accountInitials}</span><span className="profile-info"><b>{accountName||accountEmail||'Signed-in account'}</b><small>{accountEmail}</small></span><Settings size={17}/></NavLink>
+        <button type="button" className="profile-signout" onClick={logout}><LogOut size={15}/>Sign out</button>
       </div>
     </aside>
     {navOpen&&<div className="scrim" onClick={()=>setNavOpen(false)}/>}
-    <main className="main"><header className="topbar"><button className="icon-button menu-button" onClick={()=>setNavOpen(true)} aria-label="Open navigation"><Menu size={20}/></button><div className="crumb">ShareSpace <span>/</span> <strong>Campus resources</strong></div><div className="top-actions"><span className={cx('connection-chip',connection===false?'connection-error':connection===true?'connection-ok':'connection-loading')}><i/>{connection===false?'Connection unavailable':connection===true?'Campus library':'Connecting…'}</span><NavLink className="icon-button account-button" to="/settings" aria-label="Account settings"><Settings size={18}/></NavLink></div></header>
+    <main className="main"><header className="topbar"><button className="icon-button menu-button" onClick={()=>setNavOpen(true)} aria-label="Open navigation"><Menu size={20}/></button><div className="crumb">ShareSpace <span>/</span> <strong>Campus resources</strong></div><div className="top-actions"><span className={cx('connection-chip',connection===false?'connection-error':connection===true?'connection-ok':'connection-loading')}><i/>{connection===false?'Connection unavailable':connection===true?'Campus library':'Connecting…'}</span><SettingsPopover session={session} backendUser={user} theme={theme} onThemeChange={onThemeChange} onSignOut={logout}/></div></header>
       {dataErrors.resources&&<div className="backend-note" role="alert"><span><AlertTriangle size={16}/></span><div><b>Unable to load resources</b><small>{dataErrors.resources}</small></div><button onClick={refresh} className="note-retry">Retry</button></div>}
       {session.registrationNotice&&<div className="backend-note" role="status"><span><Check size={16}/></span><div><b>Email verification</b><small>{session.registrationNotice}</small></div><button onClick={session.dismissRegistrationNotice} className="note-retry">Dismiss</button></div>}
       {actionError&&<div className="backend-note action-note" role="alert"><span><AlertTriangle size={16}/></span><div><b>Action could not be completed</b><small>{actionError}</small></div><button onClick={()=>setActionError('')} className="note-retry">Dismiss</button></div>}
       <div className="page-wrap"><Routes>
         <Route path="/" element={<Dashboard {...props}/>}/><Route path="/discover" element={<Discover {...props}/>}/><Route path="/resources/new" element={<ResourceForm {...props}/>}/><Route path="/resources/:id" element={<ResourceDetail {...props}/>}/>
-        <Route path="/bookings" element={<Bookings {...props}/>}/><Route path="/bookings/:id" element={<BookingDetail {...props}/>}/><Route path="/owner" element={<OwnerQueue {...props}/>}/><Route path="/incidents" element={<Incidents {...props}/>}/><Route path="/history" element={<History {...props}/>}/><Route path="/help" element={<HelpPage/>}/><Route path="/settings" element={<SettingsPage {...props}/>}/><Route path="*" element={<NotFound/>}/>
+        <Route path="/bookings" element={<Bookings {...props}/>}/><Route path="/bookings/:id" element={<BookingDetail {...props}/>}/><Route path="/owner" element={<OwnerQueue {...props}/>}/><Route path="/incidents" element={<Incidents {...props}/>}/><Route path="/history" element={<History {...props}/>}/><Route path="/help" element={<HelpPage/>}/><Route path="/settings" element={<SettingsPage {...props} session={session}/>}/><Route path="*" element={<NotFound/>}/>
       </Routes></div>
     </main>{notice&&<div className="toast" role="status"><Check size={17}/>{notice}</div>}
   </div>;
 }
-function AuthScreen({mode}) {
+function AuthScreen({mode, theme, onThemeChange}) {
   const session = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -139,7 +189,7 @@ function AuthScreen({mode}) {
     } finally { setBusy(false); }
   };
 
-  return <main className="auth-page"><section className="auth-card">
+  return <main className="auth-page"><div className="auth-settings"><SettingsPopover session={session} theme={theme} onThemeChange={onThemeChange}/></div><section className="auth-card">
     <NavLink className="auth-brand" to="/login"><span className="brand-mark"><Grid2X2 size={19}/></span><span>share<span>space</span></span></NavLink>
     <div className="eyebrow">CAMPUS RESOURCE LIBRARY</div>
     <h1>{forgot ? 'Reset your password' : registering ? 'Create your account' : 'Welcome back'}</h1>
@@ -161,6 +211,65 @@ function AuthScreen({mode}) {
     </nav>
     <p className="auth-footnote">Your account is secured by Firebase. ShareSpace access and permissions are checked by the backend.</p>
   </section></main>;
+}
+
+function SettingsPopover({session, backendUser, theme, onThemeChange, onSignOut}) {
+  const [open,setOpen]=useState(false),[resetBusy,setResetBusy]=useState(false),[feedback,setFeedback]=useState('');
+  const popoverRef=useRef(null),triggerRef=useRef(null),navigate=useNavigate();
+  const firebaseUser=session.user;
+  const email=backendUser?.email||firebaseUser?.email||'';
+  const name=backendUser?.fullName||firebaseUser?.displayName||'';
+  const initials=name?name.split(' ').map(part=>part[0]).join('').slice(0,2):email.slice(0,1).toUpperCase();
+
+  useEffect(()=>{
+    if(!open)return undefined;
+    const onPointerDown=event=>{if(!popoverRef.current?.contains(event.target)&&!triggerRef.current?.contains(event.target))setOpen(false);};
+    const onKeyDown=event=>{if(event.key==='Escape'){setOpen(false);triggerRef.current?.focus();}};
+    document.addEventListener('pointerdown',onPointerDown);
+    document.addEventListener('keydown',onKeyDown);
+    window.requestAnimationFrame(()=>popoverRef.current?.querySelector('[data-settings-first]')?.focus());
+    return()=>{document.removeEventListener('pointerdown',onPointerDown);document.removeEventListener('keydown',onKeyDown);};
+  },[open]);
+
+  const close=()=>setOpen(false);
+  const resetPassword=async()=>{
+    if(!email)return;
+    setResetBusy(true);setFeedback('');
+    try{await session.resetPassword(email);setFeedback('If this address has a ShareSpace account, Firebase sent a password reset email.');}
+    catch(error){setFeedback(authErrorMessage(error.code));}
+    finally{setResetBusy(false);}
+  };
+  const signOut=async()=>{
+    if(!onSignOut){close();return;}
+    await onSignOut();
+  };
+
+  return <div className="settings-anchor">
+    <button ref={triggerRef} type="button" className="icon-button account-button" aria-label="Open settings" aria-haspopup="dialog" aria-expanded={open} aria-controls="settings-popover" onClick={()=>{setFeedback('');setOpen(value=>!value);}}><Settings size={18}/></button>
+    {open&&<section ref={popoverRef} className="settings-popover" id="settings-popover" role="dialog" aria-label="ShareSpace settings">
+      <div className="settings-popover-head">
+        {firebaseUser?<><span className="settings-avatar">{firebaseUser.photoURL?<img src={firebaseUser.photoURL} alt=""/>:initials}</span><span className="settings-account-copy"><b>{name||email||'Signed-in account'}</b>{email&&<small>{email}</small>}<small className="auth-status"><i/>Signed in{firebaseUser.emailVerified?' · email verified':''}</small></span></>:<span className="settings-avatar"><UserRound size={18}/></span>}
+      </div>
+      {!firebaseUser&&<div className="settings-guest"><b>You’re not signed in.</b><span>Sign in to manage your campus account.</span><div><button type="button" data-settings-first className="settings-action" onClick={()=>{close();navigate('/login');}}>Sign in</button><button type="button" className="settings-action settings-action-muted" onClick={()=>{close();navigate('/register');}}>Create account</button></div></div>}
+      {firebaseUser&&<>
+        <div className="settings-section"><span className="settings-section-label">ACCOUNT</span>
+          <NavLink data-settings-first to="/settings" className="settings-item" onClick={close}><UserRound size={16}/><span>Account information</span><ArrowRight size={14}/></NavLink>
+          <button type="button" className="settings-item" onClick={resetPassword} disabled={!email||resetBusy}><KeyRound size={16}/><span>{resetBusy?'Sending reset link…':'Password reset'}</span></button>
+          <div className="settings-security"><ShieldCheck size={16}/><span>Account security<small>{firebaseUser.emailVerified?'Verified email':'Email verification pending'}</small></span></div>
+        </div>
+        {feedback&&<p className="settings-feedback" role="status">{feedback}</p>}
+      </>}
+      <div className="settings-section"><span className="settings-section-label">APPEARANCE</span><div className="theme-options" role="group" aria-label="Color theme">
+        {[['light','Light',Sun],['dark','Dark',Moon],['system','System',Monitor]].map(([value,label,Icon])=><button key={value} type="button" className={cx('theme-option',theme===value&&'theme-option-active')} aria-pressed={theme===value} onClick={()=>onThemeChange(value)}><Icon size={15}/>{label}</button>)}
+      </div></div>
+      <div className="settings-section settings-links"><span className="settings-section-label">SUPPORT</span>
+        <NavLink to="/help" className="settings-item" onClick={close}><HelpCircle size={16}/><span>Help centre</span><ArrowRight size={14}/></NavLink>
+        <div className="settings-about"><Info size={16}/><span>About ShareSpace<small>Campus resource sharing · v1.0.0</small></span></div>
+        <div className="settings-unavailable" aria-disabled="true"><span>Notification preferences</span><small>Not supported by the current service</small></div>
+      </div>
+      {firebaseUser&&<button type="button" className="settings-signout" onClick={signOut}><LogOut size={16}/>Sign out</button>}
+    </section>}
+  </div>;
 }
 
 function PageHead({eyebrow,title,description,action}){return <div className="page-head"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{description}</p></div>{action}</div>;}
@@ -343,8 +452,16 @@ function HelpPage() {
   return <><PageHead eyebrow="SHARESPACE GUIDE" title="Help centre" description="How to find, share, and care for campus resources."/><div className="help-content">{topics.map(([title,content],i)=><section className="panel help-topic" id={i===4?'guidelines':undefined} key={title}><span className="help-step">{String(i+1).padStart(2,'0')}</span><div><h2>{title}</h2><p>{content}</p></div></section>)}</div><NavLink className="btn btn-outline" to="/discover"><Search size={16}/>Explore resources</NavLink></>;
 }
 function SettingsPage(p) {
-  return <><PageHead eyebrow="ACCOUNT" title="Settings" description="View account information available from ShareSpace."/>
-    {p.user?<section className="panel settings-panel"><h2>Profile details</h2><dl><div><dt>Name</dt><dd>{p.user.fullName||'Not provided'}</dd></div><div><dt>Email</dt><dd>{p.user.email||'Not provided'}</dd></div><div><dt>Account role</dt><dd>{p.user.role||'Not provided'}</dd></div><div><dt>Membership</dt><dd>{p.user.membershipStatus||'Not provided'}</dd></div></dl><p className="settings-note">Profile editing and notification preferences are not supported by the current API.</p></section>:<section className="panel settings-panel"><h2>Account information unavailable</h2><p>{p.dataErrors.user||'The current backend does not provide an authenticated account session.'}</p><p className="settings-note">Profile editing and notification preference endpoints are not available, so no unsaved preference controls are shown.</p></section>}
+  const firebaseUser=p.session.user;
+  const profileName=p.user?.fullName||firebaseUser?.displayName;
+  const profileEmail=p.user?.email||firebaseUser?.email;
+  const providerNames=firebaseUser?.providerData?.map(provider=>provider.providerId.replace('.com','')).join(', ');
+  return <><PageHead eyebrow="ACCOUNT" title="Account information" description="Details provided by your signed-in account and ShareSpace profile."/>
+    <section className="panel settings-panel account-details-panel"><div className="account-details-heading"><span className="settings-avatar">{firebaseUser?.photoURL?<img src={firebaseUser.photoURL} alt=""/>:profileName?profileName.split(' ').map(part=>part[0]).join('').slice(0,2):profileEmail?.slice(0,1).toUpperCase()}</span><div><h2>{profileName||profileEmail||'Signed-in account'}</h2><p>{profileEmail||'No email address is available from Firebase.'}</p></div></div>
+      <dl><div><dt>Authentication</dt><dd>Firebase{providerNames?` · ${providerNames}`:''}</dd></div><div><dt>Email status</dt><dd>{firebaseUser?.emailVerified?'Verified':'Not verified'}</dd></div><div><dt>ShareSpace role</dt><dd>{p.user?.role||'Unavailable'}</dd></div><div><dt>Membership</dt><dd>{p.user?.membershipStatus||'Unavailable'}</dd></div></dl>
+      {!p.user&&<p className="settings-note" role="status">Firebase account details are available. ShareSpace role and membership details could not be loaded from the backend{p.dataErrors.user?`: ${p.dataErrors.user}`:'.'}</p>}
+      <p className="settings-note">Profile editing and notification preferences are not supported by the current API. Use the settings menu for appearance, password reset, help, and sign out.</p>
+    </section>
     <NavLink className="btn btn-outline settings-back" to="/"><ArrowRight size={16}/>Return to overview</NavLink>
   </>;
 }

@@ -28,3 +28,15 @@ const errorMessages = {
 export function authErrorMessage(code) {
   return errorMessages[code] || 'Firebase could not complete this request. Check your details and try again.';
 }
+
+export function apiErrorMessage(status, body = {}, { hasToken = false, refreshed = false } = {}) {
+  if (status === 401) {
+    if (!hasToken) return 'Sign in to continue. Your account session is not available to ShareSpace.';
+    if (refreshed) return 'ShareSpace rejected the refreshed Firebase session. Check that the frontend and backend use the same Firebase project, then sign in again.';
+    return 'ShareSpace could not authenticate this request. Your session may need to be renewed.';
+  }
+  if (status === 403) return body.message || 'You are signed in, but your account does not have permission to perform this action.';
+  if (status === 503) return body.message || 'The ShareSpace identity service is not configured. Contact the application administrator.';
+  if (status >= 500) return 'ShareSpace encountered a server error. Try again in a little while.';
+  return body.message || body.detail || body.error || `Request failed (${status})`;
+}
