@@ -45,10 +45,15 @@ public class ApiConfig implements WebMvcConfigurer {
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        registry.addMapping("/api/**")
-                .allowedOrigins(origin)
-                .allowedMethods("GET", "POST", "PUT", "OPTIONS")
-                .allowedHeaders(HttpHeaders.CONTENT_TYPE, HttpHeaders.AUTHORIZATION);
+        registry.addMapping("/**")
+                .allowedOrigins(
+                        "https://share-space-xi.vercel.app"
+                )
+                .allowedMethods(
+                        "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"
+                )
+                .allowedHeaders("*")
+                .maxAge(3600);
     }
 
     @Bean
