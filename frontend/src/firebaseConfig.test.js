@@ -11,25 +11,25 @@ test('demo mode is enabled only by an explicit true environment value', () => {
 test('maps Vite Firebase environment fields to the Firebase SDK configuration', () => {
   const config = firebaseConfigFromEnv({
     VITE_FIREBASE_API_KEY: 'test-web-key',
-    VITE_FIREBASE_AUTH_DOMAIN: 'sharespace-3092.firebaseapp.com',
-    VITE_FIREBASE_PROJECT_ID: 'sharespace-3092',
+    VITE_FIREBASE_AUTH_DOMAIN: 'sharespace-30a92.firebaseapp.com',
+    VITE_FIREBASE_PROJECT_ID: 'sharespace-30a92',
     VITE_FIREBASE_APP_ID: 'test-app-id',
     VITE_FIREBASE_MESSAGING_SENDER_ID: 'test-sender-id',
-    VITE_FIREBASE_STORAGE_BUCKET: 'sharespace-3092.firebasestorage.app',
+    VITE_FIREBASE_STORAGE_BUCKET: 'sharespace-30a92.firebasestorage.app',
   });
 
   assert.deepEqual(config, {
     apiKey: 'test-web-key',
-    authDomain: 'sharespace-3092.firebaseapp.com',
-    projectId: 'sharespace-3092',
+    authDomain: 'sharespace-30a92.firebaseapp.com',
+    projectId: 'sharespace-30a92',
     appId: 'test-app-id',
     messagingSenderId: 'test-sender-id',
-    storageBucket: 'sharespace-3092.firebasestorage.app',
+    storageBucket: 'sharespace-30a92.firebasestorage.app',
   });
   assert.equal(hasRequiredFirebaseConfig(config), true);
 });
 
 test('does not initialize Firebase when required Vite configuration is missing', () => {
-  const config = firebaseConfigFromEnv({ VITE_FIREBASE_PROJECT_ID: 'sharespace-3092' });
+  const config = firebaseConfigFromEnv({ VITE_FIREBASE_PROJECT_ID: 'sharespace-30a92' });
   assert.equal(hasRequiredFirebaseConfig(config), false);
 });

@@ -22,7 +22,7 @@ app:
   demo-mode-activated-at: ${DEMO_MODE_ACTIVATED_AT:}
   demo-mode-ttl: ${DEMO_MODE_TTL:PT48H}
   firebase:
-    project-id: ${FIREBASE_PROJECT_ID:sharespace-3092}
+    project-id: ${FIREBASE_PROJECT_ID:sharespace-30a92}
   seed-demo-data: ${SEED_DEMO_DATA:false}
   active-booking-limit: ${ACTIVE_BOOKING_LIMIT:3}
   waitlist-enabled: ${WAITLIST_ENABLED:true}

@@ -6,11 +6,12 @@ import { auth, demoMode } from './firebase.js';
 import { signOut } from 'firebase/auth';
 import { apiErrorMessage, authErrorMessage, authRouteState } from './authState.js';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
+const API = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8080/api' : '');
 const cx = (...values) => values.filter(Boolean).join(' ');
 const activeStatuses = new Set(['PENDING','APPROVED','WAITLISTED','CHECKED_OUT','RETURN_PENDING_CONFIRMATION','OVERDUE']);
 const localDateTime = date => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0,16);
 async function api(path, options = {}) {
+  if (!API) throw new Error('ShareSpace API URL is not configured for this deployment.');
   const currentUser = demoMode ? null : auth?.currentUser;
   const request = async (forceRefresh = false) => {
     let token = null;
