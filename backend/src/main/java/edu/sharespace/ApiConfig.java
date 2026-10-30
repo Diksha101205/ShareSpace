@@ -24,6 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Map;
 
 @Configuration
@@ -36,9 +37,12 @@ public class ApiConfig implements WebMvcConfigurer {
     @Value("${app.firebase.project-id:}")
     String firebaseProjectId;
 
+    @Value("${app.demo-mode:false}")
+    boolean demoModeEnabled;
+
     @PostConstruct
     void reportFirebaseConfiguration() {
-        if (firebaseProjectId == null || firebaseProjectId.isBlank()) {
+        if (!demoModeEnabled && (firebaseProjectId == null || firebaseProjectId.isBlank())) {
             log.warn("Firebase Admin is disabled because FIREBASE_PROJECT_ID is not configured; protected API requests cannot verify Firebase tokens.");
         }
     }
@@ -46,9 +50,7 @@ public class ApiConfig implements WebMvcConfigurer {
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/**")
-                .allowedOrigins(
-                        "https://share-space-xi.vercel.app/"
-                )
+                .allowedOrigins(Arrays.stream(origin.split(",")).map(String::trim).filter(value -> !value.isEmpty()).toArray(String[]::new))
                 .allowedMethods(
                         "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"
                 )
@@ -59,8 +61,9 @@ public class ApiConfig implements WebMvcConfigurer {
     @Bean
     FirebaseTokenFilter firebaseTokenFilter(ObjectProvider<FirebaseAuth> firebaseAuth,
                                              FirebaseUserProvisioner provisioner,
+                                             DemoModeService demoMode,
                                              ObjectMapper objectMapper) {
-        return new FirebaseTokenFilter(firebaseAuth, provisioner, objectMapper);
+        return new FirebaseTokenFilter(firebaseAuth, provisioner, demoMode, objectMapper);
     }
 
     @Bean

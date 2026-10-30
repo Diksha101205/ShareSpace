@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Activity, AlertTriangle, ArrowRight, ArrowUpRight, CalendarDays, Check, Clock3, Grid2X2, HelpCircle, Home, Info, KeyRound, LogOut, MapPin, Menu, Monitor, Plus, Search, Settings, ShieldCheck, SlidersHorizontal, Sparkles, Sun, Moon, UserRound, X } from 'lucide-react';
 import { useAuth } from './AuthContext.jsx';
-import { auth } from './firebase.js';
+import { auth, demoMode } from './firebase.js';
 import { signOut } from 'firebase/auth';
 import { apiErrorMessage, authErrorMessage, authRouteState } from './authState.js';
 
@@ -11,7 +11,7 @@ const cx = (...values) => values.filter(Boolean).join(' ');
 const activeStatuses = new Set(['PENDING','APPROVED','WAITLISTED','CHECKED_OUT','RETURN_PENDING_CONFIRMATION','OVERDUE']);
 const localDateTime = date => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0,16);
 async function api(path, options = {}) {
-  const currentUser = auth?.currentUser;
+  const currentUser = demoMode ? null : auth?.currentUser;
   const request = async (forceRefresh = false) => {
     let token = null;
     if (currentUser) {
@@ -29,7 +29,7 @@ async function api(path, options = {}) {
     try {
       response = await fetch(API + path, {
         ...options,
-        headers: { ...(options.headers || {}), 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: { ...(options.headers || {}), 'Content-Type': 'application/json', ...(demoMode ? { 'X-ShareSpace-Demo': 'true' } : token ? { Authorization: `Bearer ${token}` } : {}) },
       });
     } catch {
       throw new Error('Unable to connect to ShareSpace. Check your connection and retry.');
@@ -73,7 +73,7 @@ function App() {
     try { localStorage.setItem('sharespace-theme', nextTheme); } catch { /* Theme still changes for this session. */ }
     setTheme(nextTheme);
   };
-  const gate = authRouteState({ ...session, pathname: location.pathname });
+  const gate = authRouteState({ ...session, pathname: location.pathname, demoMode });
   if (gate.view === 'loading') return <div className="auth-loading" role="status">Restoring your secure session…</div>;
   if (gate.view === 'auth') {
     return <Routes>
@@ -113,6 +113,7 @@ function Workspace({session, theme, onThemeChange}) {
     finally{setBusy(false);lock.current=false;}
   };
   const logout=async()=>{
+    if(session.demoMode)return;
     try { await session.logout(); navigate('/login',{replace:true}); }
     catch { setActionError('ShareSpace could not complete sign out. Please try again.'); }
   };
@@ -133,12 +134,12 @@ function Workspace({session, theme, onThemeChange}) {
         <NavLink to="/help" className={({isActive})=>cx('nav-item',isActive&&'selected')} onClick={()=>setNavOpen(false)}><HelpCircle size={18}/>Help centre</NavLink>
       </nav>
       <div className="sidebar-bottom"><NavLink to="/help" className="help-card"><span className="help-icon"><HelpCircle size={18}/></span><b>Need a hand?</b><span className="help-copy">Guidance for sharing campus resources.</span><span className="help-link">Visit Help Centre <ArrowRight size={13}/></span></NavLink>
-        <NavLink to="/settings" className="profile profile-link"><span className="avatar">{session.user?.photoURL?<img src={session.user.photoURL} alt=""/>:accountInitials}</span><span className="profile-info"><b>{accountName||accountEmail||'Signed-in account'}</b><small>{accountEmail}</small></span><Settings size={17}/></NavLink>
-        <button type="button" className="profile-signout" onClick={logout}><LogOut size={15}/>Sign out</button>
+        <NavLink to="/settings" className="profile profile-link"><span className="avatar">{session.user?.photoURL?<img src={session.user.photoURL} alt=""/>:accountInitials}</span><span className="profile-info"><b>{accountName||accountEmail||(session.demoMode?'Temporary shared account':'Signed-in account')}</b><small>{accountEmail}</small></span><Settings size={17}/></NavLink>
+        {!session.demoMode&&<button type="button" className="profile-signout" onClick={logout}><LogOut size={15}/>Sign out</button>}
       </div>
     </aside>
     {navOpen&&<div className="scrim" onClick={()=>setNavOpen(false)}/>}
-    <main className="main"><header className="topbar"><button className="icon-button menu-button" onClick={()=>setNavOpen(true)} aria-label="Open navigation"><Menu size={20}/></button><div className="crumb">ShareSpace <span>/</span> <strong>Campus resources</strong></div><div className="top-actions"><span className={cx('connection-chip',connection===false?'connection-error':connection===true?'connection-ok':'connection-loading')}><i/>{connection===false?'Connection unavailable':connection===true?'Campus library':'Connecting…'}</span><SettingsPopover session={session} backendUser={user} theme={theme} onThemeChange={onThemeChange} onSignOut={logout}/></div></header>
+    <main className="main"><header className="topbar"><button className="icon-button menu-button" onClick={()=>setNavOpen(true)} aria-label="Open navigation"><Menu size={20}/></button><div className="crumb">ShareSpace <span>/</span> <strong>Campus resources</strong></div><div className="top-actions">{session.demoMode&&<span className="demo-mode-chip">Demo Mode</span>}<span className={cx('connection-chip',connection===false?'connection-error':connection===true?'connection-ok':'connection-loading')}><i/>{connection===false?'Connection unavailable':connection===true?'Campus library':'Connecting…'}</span><SettingsPopover session={session} backendUser={user} theme={theme} onThemeChange={onThemeChange} onSignOut={logout}/></div></header>
       {dataErrors.resources&&<div className="backend-note" role="alert"><span><AlertTriangle size={16}/></span><div><b>Unable to load resources</b><small>{dataErrors.resources}</small></div><button onClick={refresh} className="note-retry">Retry</button></div>}
       {session.registrationNotice&&<div className="backend-note" role="status"><span><Check size={16}/></span><div><b>Email verification</b><small>{session.registrationNotice}</small></div><button onClick={session.dismissRegistrationNotice} className="note-retry">Dismiss</button></div>}
       {actionError&&<div className="backend-note action-note" role="alert"><span><AlertTriangle size={16}/></span><div><b>Action could not be completed</b><small>{actionError}</small></div><button onClick={()=>setActionError('')} className="note-retry">Dismiss</button></div>}
@@ -250,7 +251,8 @@ function SettingsPopover({session, backendUser, theme, onThemeChange, onSignOut}
       <div className="settings-popover-head">
         {firebaseUser?<><span className="settings-avatar">{firebaseUser.photoURL?<img src={firebaseUser.photoURL} alt=""/>:initials}</span><span className="settings-account-copy"><b>{name||email||'Signed-in account'}</b>{email&&<small>{email}</small>}<small className="auth-status"><i/>Signed in{firebaseUser.emailVerified?' · email verified':''}</small></span></>:<span className="settings-avatar"><UserRound size={18}/></span>}
       </div>
-      {!firebaseUser&&<div className="settings-guest"><b>You’re not signed in.</b><span>Sign in to manage your campus account.</span><div><button type="button" data-settings-first className="settings-action" onClick={()=>{close();navigate('/login');}}>Sign in</button><button type="button" className="settings-action settings-action-muted" onClick={()=>{close();navigate('/register');}}>Create account</button></div></div>}
+      {session.demoMode&&<div className="settings-guest"><b>Temporary shared identity</b><span>All visitors use the same backend profile while Demo Mode is active.</span></div>}
+      {!firebaseUser&&!session.demoMode&&<div className="settings-guest"><b>You’re not signed in.</b><span>Sign in to manage your campus account.</span><div><button type="button" data-settings-first className="settings-action" onClick={()=>{close();navigate('/login');}}>Sign in</button><button type="button" className="settings-action settings-action-muted" onClick={()=>{close();navigate('/register');}}>Create account</button></div></div>}
       {firebaseUser&&<>
         <div className="settings-section"><span className="settings-section-label">ACCOUNT</span>
           <NavLink data-settings-first to="/settings" className="settings-item" onClick={close}><UserRound size={16}/><span>Account information</span><ArrowRight size={14}/></NavLink>
@@ -267,7 +269,7 @@ function SettingsPopover({session, backendUser, theme, onThemeChange, onSignOut}
         <div className="settings-about"><Info size={16}/><span>About ShareSpace<small>Campus resource sharing · v1.0.0</small></span></div>
         <div className="settings-unavailable" aria-disabled="true"><span>Notification preferences</span><small>Not supported by the current service</small></div>
       </div>
-      {firebaseUser&&<button type="button" className="settings-signout" onClick={signOut}><LogOut size={16}/>Sign out</button>}
+      {firebaseUser&&!session.demoMode&&<button type="button" className="settings-signout" onClick={signOut}><LogOut size={16}/>Sign out</button>}
     </section>}
   </div>;
 }
@@ -442,7 +444,7 @@ function History(p) {
 function HelpPage() {
   useEffect(()=>{if(window.location.hash)document.getElementById(window.location.hash.slice(1))?.scrollIntoView({block:'start'});},[]);
   const topics=[    ['Discovering resources','Search published listings, filter by category or location, and open a listing for its location, usage guidance, training requirements, and booking duration.'],
-    ['Publishing a resource','Provide the name, category, location, description, and maximum duration. The API permits creation only for an authorized owner or administrator. You will see success only after the server accepts the listing.'],
+    ['Publishing a resource','Provide the name, category, location, description, and maximum duration. Any authenticated account can publish a resource; the backend assigns the owner from the verified account. You will see success only after the server accepts the listing.'],
     ['Requesting and managing bookings','Choose future start and end times within the listing duration and explain your purpose. The API enforces overlap, eligibility, approval, and fair-use limits. Rejections and conflicts appear as request errors.'],
     ['Owner approvals','Owners can approve or reject pending requests for their own resources. Each decision requires a reason. Availability is rechecked by the backend when approving.'],
     ['Check-in and return','An approved booking requires a BEFORE condition report before check-in. A CHECKED_OUT booking requires an AFTER report before return submission. The resource owner confirms the return.'],
@@ -458,8 +460,8 @@ function SettingsPage(p) {
   const providerNames=firebaseUser?.providerData?.map(provider=>provider.providerId.replace('.com','')).join(', ');
   return <><PageHead eyebrow="ACCOUNT" title="Account information" description="Details provided by your signed-in account and ShareSpace profile."/>
     <section className="panel settings-panel account-details-panel"><div className="account-details-heading"><span className="settings-avatar">{firebaseUser?.photoURL?<img src={firebaseUser.photoURL} alt=""/>:profileName?profileName.split(' ').map(part=>part[0]).join('').slice(0,2):profileEmail?.slice(0,1).toUpperCase()}</span><div><h2>{profileName||profileEmail||'Signed-in account'}</h2><p>{profileEmail||'No email address is available from Firebase.'}</p></div></div>
-      <dl><div><dt>Authentication</dt><dd>Firebase{providerNames?` · ${providerNames}`:''}</dd></div><div><dt>Email status</dt><dd>{firebaseUser?.emailVerified?'Verified':'Not verified'}</dd></div><div><dt>ShareSpace role</dt><dd>{p.user?.role||'Unavailable'}</dd></div><div><dt>Membership</dt><dd>{p.user?.membershipStatus||'Unavailable'}</dd></div></dl>
-      {!p.user&&<p className="settings-note" role="status">Firebase account details are available. ShareSpace role and membership details could not be loaded from the backend{p.dataErrors.user?`: ${p.dataErrors.user}`:'.'}</p>}
+    <dl><div><dt>Authentication</dt><dd>{p.session.demoMode?'Temporary demo identity':`Firebase${providerNames?` · ${providerNames}`:''}`}</dd></div><div><dt>Email status</dt><dd>{p.session.demoMode?'Not applicable':firebaseUser?.emailVerified?'Verified':'Not verified'}</dd></div><div><dt>ShareSpace role</dt><dd>{p.user?.role||'Unavailable'}</dd></div><div><dt>Membership</dt><dd>{p.user?.membershipStatus||'Unavailable'}</dd></div></dl>
+      {!p.user&&<p className="settings-note" role="status">{p.session.demoMode?'The temporary profile could not be loaded from the backend.':`Firebase account details are available. ShareSpace role and membership details could not be loaded from the backend${p.dataErrors.user?`: ${p.dataErrors.user}`:'.'}`}</p>}
       <p className="settings-note">Profile editing and notification preferences are not supported by the current API. Use the settings menu for appearance, password reset, help, and sign out.</p>
     </section>
     <NavLink className="btn btn-outline settings-back" to="/"><ArrowRight size={16}/>Return to overview</NavLink>

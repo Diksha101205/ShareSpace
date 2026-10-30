@@ -31,11 +31,14 @@ class FirebaseTokenFilter extends OncePerRequestFilter {
 
     private final ObjectProvider<FirebaseAuth> firebaseAuth;
     private final FirebaseUserProvisioner provisioner;
+    private final DemoModeService demoMode;
     private final ObjectMapper objectMapper;
 
-    FirebaseTokenFilter(ObjectProvider<FirebaseAuth> firebaseAuth, FirebaseUserProvisioner provisioner, ObjectMapper objectMapper) {
+    FirebaseTokenFilter(ObjectProvider<FirebaseAuth> firebaseAuth, FirebaseUserProvisioner provisioner,
+                        DemoModeService demoMode, ObjectMapper objectMapper) {
         this.firebaseAuth = firebaseAuth;
         this.provisioner = provisioner;
+        this.demoMode = demoMode;
         this.objectMapper = objectMapper;
     }
 
@@ -52,6 +55,28 @@ class FirebaseTokenFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
+        String demoHeader = request.getHeader(DemoModeService.HEADER);
+        if (authorization == null && "true".equalsIgnoreCase(demoHeader)) {
+            DemoModePolicy.State state = demoMode.state();
+            if (state != DemoModePolicy.State.ACTIVE) {
+                HttpStatus status = state == DemoModePolicy.State.EXPIRED ? HttpStatus.GONE : HttpStatus.SERVICE_UNAVAILABLE;
+                String message = state == DemoModePolicy.State.EXPIRED
+                        ? "Temporary demo access has expired"
+                        : "Temporary demo access is not enabled or has not activated";
+                writeError(request, response, status, message);
+                return;
+            }
+            try {
+                Domain.User user = demoMode.identity();
+                log.info("Temporary demo identity accepted (method={}, path={})", request.getMethod(), request.getServletPath());
+                setAuthentication(new ShareSpacePrincipal(DemoModeService.SUBJECT, user));
+                chain.doFilter(request, response);
+            } catch (org.springframework.web.server.ResponseStatusException ex) {
+                SecurityContextHolder.clearContext();
+                writeError(request, response, HttpStatus.valueOf(ex.getStatusCode().value()), ex.getReason());
+            }
+            return;
+        }
         if (authorization == null) {
             log.warn("Protected API request has no Authorization header (method={}, path={})",
                     request.getMethod(), request.getServletPath());
@@ -71,7 +96,7 @@ class FirebaseTokenFilter extends OncePerRequestFilter {
             return;
         }
 
-        FirebasePrincipal principal;
+        ShareSpacePrincipal principal;
         try {
             FirebaseToken token = verifier.verifyIdToken(authorization.substring(7).trim());
             log.info("Firebase token verification succeeded (method={}, path={})", request.getMethod(), request.getServletPath());
@@ -85,7 +110,7 @@ class FirebaseTokenFilter extends OncePerRequestFilter {
             }
             log.info("Firebase user profile provisioning succeeded (method={}, path={})",
                     request.getMethod(), request.getServletPath());
-            principal = new FirebasePrincipal(token.getUid(), user);
+            principal = new ShareSpacePrincipal(token.getUid(), user);
         } catch (FirebaseAuthException ex) {
             SecurityContextHolder.clearContext();
             AuthErrorCode code = ex.getAuthErrorCode();
@@ -113,10 +138,14 @@ class FirebaseTokenFilter extends OncePerRequestFilter {
             writeError(request, response, HttpStatus.valueOf(ex.getStatusCode().value()), ex.getReason());
             return;
         }
+        setAuthentication(principal);
+        chain.doFilter(request, response);
+    }
+
+    private void setAuthentication(ShareSpacePrincipal principal) {
         UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                 principal, null, List.of(new SimpleGrantedAuthority("ROLE_" + principal.user().role.name())));
         SecurityContextHolder.getContext().setAuthentication(authentication);
-        chain.doFilter(request, response);
     }
 
     private void writeError(HttpServletRequest request, HttpServletResponse response, HttpStatus status, String message) throws IOException {

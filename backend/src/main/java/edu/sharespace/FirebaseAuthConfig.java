@@ -6,6 +6,7 @@ import com.google.firebase.FirebaseOptions;
 import com.google.firebase.auth.FirebaseAuth;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.slf4j.Logger;
@@ -16,6 +17,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 @Configuration
+@ConditionalOnProperty(name = "app.demo-mode", havingValue = "false", matchIfMissing = true)
 @ConditionalOnExpression("!'${app.firebase.project-id:}'.isEmpty()")
 class FirebaseAuthConfig {
 
@@ -35,11 +37,11 @@ class FirebaseAuthConfig {
                             serviceAccountJson.getBytes(StandardCharsets.UTF_8)
                     )
             );
-            log.info("Firebase Admin initialized using service account credentials.");
+            log.info("Firebase Admin initialized using service account credentials for project {}.", projectId);
 
         } else {
             credentials = GoogleCredentials.getApplicationDefault();
-            log.info("Firebase Admin initialized using Application Default Credentials.");
+            log.info("Firebase Admin initialized using Application Default Credentials for project {}.", projectId);
         }
 
         return FirebaseApp.initializeApp(

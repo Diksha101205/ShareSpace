@@ -8,17 +8,17 @@ import {
   signOut,
   updateProfile,
 } from 'firebase/auth';
-import { auth, firebaseConfigured } from './firebase.js';
+import { auth, demoMode, firebaseConfigured } from './firebase.js';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(firebaseConfigured);
+  const [loading, setLoading] = useState(!demoMode && firebaseConfigured);
   const [registrationNotice, setRegistrationNotice] = useState('');
 
   useEffect(() => {
-    if (!auth) {
+    if (demoMode || !auth) {
       setLoading(false);
       return undefined;
     }
@@ -34,6 +34,7 @@ export function AuthProvider({ children }) {
   const value = useMemo(() => ({
     user,
     loading,
+    demoMode,
     configured: firebaseConfigured,
     registrationNotice,
     dismissRegistrationNotice() { setRegistrationNotice(''); },

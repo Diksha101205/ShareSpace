@@ -16,7 +16,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @DataJpaTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:firebase-provisioning;DB_CLOSE_DELAY=-1",
-        "spring.jpa.hibernate.ddl-auto=create-drop"
+        "spring.jpa.hibernate.ddl-auto=create-drop",
+        "spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.H2Dialect"
 })
 @Import(FirebaseUserProvisioner.class)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)

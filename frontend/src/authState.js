@@ -4,7 +4,8 @@ const authModes = new Map([
   ['/forgot-password', 'forgot'],
 ]);
 
-export function authRouteState({ loading, configured, user, pathname }) {
+export function authRouteState({ loading, configured, user, pathname, demoMode = false }) {
+  if (demoMode) return authModes.has(pathname) ? { view: 'redirect-workspace' } : { view: 'workspace' };
   if (loading) return { view: 'loading' };
   if (!user) {
     const mode = authModes.get(pathname);

@@ -6,15 +6,19 @@ Base URL: `http://localhost:8080/api`. JSON timestamps are ISO-8601 strings with
 {"timestamp":"2026-10-28T12:00:00Z","status":409,"error":"Conflict","message":"Only approved bookings can be checked in","path":"/api/bookings/15/check-in","fields":{}}
 ```
 
-Validation errors return `400` with `fields` mapping property names to validation messages. Other common statuses: `401` missing/invalid Firebase bearer token, `403` authenticated but not permitted, `404` missing record, `409` conflict or invalid state transition, and `503` when backend Firebase verification is not configured. Malformed JSON returns Spring's standard `400` response.
+Validation errors return `400` with `fields` mapping property names to validation messages. Other common statuses: `401` missing/invalid Firebase bearer token, `403` authenticated but not permitted, `404` missing record, `409` conflict or invalid state transition, and `503` when backend Firebase verification is not configured. Temporary access requests return `410` after the configured expiry. Malformed JSON returns Spring's standard `400` response.
 
 ## Authentication and access
 
 Account registration, sign-in, sign-out, and password reset are handled by Firebase Authentication in the frontend. The frontend sends the current Firebase ID token on protected API requests as `Authorization: Bearer <Firebase-ID-token>`. The backend verifies the signature, issuer, audience/project, and expiration with the Firebase Admin SDK; it never treats a client-supplied user ID, email, or role as identity. Protected endpoints return `401 Unauthorized` when the token is missing or invalid and `403 Forbidden` for an authenticated user without permission. `GET /health`, `GET /resources`, and `GET /resources/{id}` remain public.
 
-The backend provisions an ordinary `USER` profile after verifying a Firebase token. Verified email can link an existing ordinary profile idempotently; UID and email uniqueness plus a database transaction protect first login. Elevated `OWNER` and `ADMIN` profiles cannot be claimed by self-registration: an administrator must provision their Firebase UID into the trusted `firebase_uid` field of the existing account. Firebase roles or registration form fields are never used to grant application roles. The former `X-Demo-User` identity header is no longer accepted.
+The backend provisions an ordinary `USER` profile after verifying a Firebase token. Verified email can link an existing ordinary profile idempotently; UID and email uniqueness plus a database transaction protect first login. Elevated `OWNER` and `ADMIN` profiles cannot be claimed by self-registration: an administrator must provision their Firebase UID into the trusted `firebase_uid` field of the existing account. Firebase roles or registration form fields are never used to grant application roles.
 
 Firebase Admin is initialized only when `FIREBASE_PROJECT_ID` is configured. Credentials come from Google Application Default Credentials (for local development, `gcloud auth application-default login`) or `GOOGLE_APPLICATION_CREDENTIALS` pointing to a service-account file stored outside the repository. Never commit a service-account file. If Firebase is not configured, bearer-protected calls return `503`; anonymous calls to protected routes return `401`.
+
+### Temporary hackathon access
+
+**Temporary only; not suitable for production or private data.** To explicitly request the one shared server-controlled `USER` identity, send `X-ShareSpace-Demo: true` with a protected request while the backend is enabled and before expiry. No client user ID or role is accepted. This mode requires Render `DEMO_MODE=true`, `DEMO_MODE_ACTIVATED_AT=<activation time in UTC ISO-8601>`, and optional `DEMO_MODE_TTL=PT48H` (positive and at most 48 hours). Requests carrying `Authorization` always follow Firebase verification; invalid Firebase tokens are never downgraded to the shared identity. Disabled or not-yet-active mode returns `503`; expired mode returns `410`. The frontend selects this request mode only when built with `VITE_DEMO_MODE=true`.
 
 ## Resources
 
@@ -22,8 +26,8 @@ Firebase Admin is initialized only when `FIREBASE_PROJECT_ID` is configured. Cre
 |---|---|---|
 | `GET /resources` | Public | List available resources. Optional `q`, `category`, `location`, `startTime`, `endTime` filters. Availability requires both times, and only resources with no confirmed/active overlap are returned. |
 | `GET /resources/{id}` | Public | Get one resource. |
-| `POST /resources` | Owner/Admin | Create (`201`). |
-| `PUT /resources/{id}` | Owner/Admin | Edit only own resource unless Admin. |
+| `POST /resources` | Identity required | Create (`201`); the backend assigns the owner from the resolved identity. |
+| `PUT /resources/{id}` | Identity required | Edit only own resource unless Admin. |
 
 Resource create/update body:
 

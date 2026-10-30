@@ -4,7 +4,7 @@ spring:
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/sharespace_db}
     username: ${DB_USER:postgres}
-    password: ${DB_PASSWORD:1510}
+    password: ${DB_PASSWORD:}
   jpa:
     hibernate:
       ddl-auto: update
@@ -19,8 +19,10 @@ spring:
 app:
   cors-origin: ${FRONTEND_ORIGIN:http://localhost:5173}
   demo-mode: ${DEMO_MODE:false}
+  demo-mode-activated-at: ${DEMO_MODE_ACTIVATED_AT:}
+  demo-mode-ttl: ${DEMO_MODE_TTL:PT48H}
   firebase:
-    project-id: ${FIREBASE_PROJECT_ID:sharespace-30a92}
+    project-id: ${FIREBASE_PROJECT_ID:sharespace-3092}
   seed-demo-data: ${SEED_DEMO_DATA:false}
   active-booking-limit: ${ACTIVE_BOOKING_LIMIT:3}
   waitlist-enabled: ${WAITLIST_ENABLED:true}

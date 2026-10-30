@@ -23,8 +23,9 @@ class FirebaseTokenFilterTest {
     private final ObjectMapper mapper = new ObjectMapper();
     private final ObjectProvider<FirebaseAuth> authProvider = mock(ObjectProvider.class);
     private final FirebaseUserProvisioner provisioner = mock(FirebaseUserProvisioner.class);
+    private final DemoModeService demoMode = mock(DemoModeService.class);
     private final FirebaseAuth firebaseAuth = mock(FirebaseAuth.class);
-    private final FirebaseTokenFilter filter = new FirebaseTokenFilter(authProvider, provisioner, mapper);
+    private final FirebaseTokenFilter filter = new FirebaseTokenFilter(authProvider, provisioner, demoMode, mapper);
 
     @AfterEach
     void clearSecurityContext() {
@@ -71,8 +72,42 @@ class FirebaseTokenFilterTest {
         filter.doFilter(request("Bearer valid-token"), new MockHttpServletResponse(), mock(FilterChain.class));
 
         Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        assertEquals(new FirebasePrincipal("firebase-uid-17", user), principal);
+        assertEquals(new ShareSpacePrincipal("firebase-uid-17", user), principal);
         verify(provisioner).provision("firebase-uid-17", "taylor@example.edu", "Taylor Morgan", true);
+    }
+
+    @Test
+    void explicitActiveDemoRequestUsesOnlyTheBackendControlledProfile() throws Exception {
+        User user = new User(DemoModeService.FULL_NAME, DemoModeService.EMAIL, Role.USER);
+        user.id = 91L;
+        when(demoMode.state()).thenReturn(DemoModePolicy.State.ACTIVE);
+        when(demoMode.identity()).thenReturn(user);
+        MockHttpServletRequest request = request(null);
+        request.addHeader(DemoModeService.HEADER, "true");
+        FilterChain chain = mock(FilterChain.class);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(new ShareSpacePrincipal(DemoModeService.SUBJECT, user),
+                SecurityContextHolder.getContext().getAuthentication().getPrincipal());
+        verify(demoMode).identity();
+        verifyNoInteractions(provisioner);
+        verify(chain).doFilter(request, response);
+    }
+
+    @Test
+    void invalidFirebaseBearerNeverFallsBackToDemoIdentity() throws Exception {
+        when(authProvider.getIfAvailable()).thenReturn(firebaseAuth);
+        when(firebaseAuth.verifyIdToken("invalid-token")).thenThrow(new IllegalArgumentException("bad token"));
+        MockHttpServletRequest request = request("Bearer invalid-token");
+        request.addHeader(DemoModeService.HEADER, "true");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, mock(FilterChain.class));
+
+        assertEquals(401, response.getStatus());
+        verifyNoInteractions(demoMode);
     }
 
     @Test

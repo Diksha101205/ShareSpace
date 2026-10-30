@@ -10,6 +10,11 @@ test('redirects unauthenticated protected routes to login', () => {
   assert.deepEqual(authRouteState({ loading: false, configured: true, user: null, pathname: '/bookings/12' }), { view: 'redirect-login' });
 });
 
+test('demo mode opens protected routes without Firebase and routes auth pages into the workspace', () => {
+  assert.deepEqual(authRouteState({ loading: false, configured: false, user: null, pathname: '/bookings', demoMode: true }), { view: 'workspace' });
+  assert.deepEqual(authRouteState({ loading: false, configured: false, user: null, pathname: '/login', demoMode: true }), { view: 'redirect-workspace' });
+});
+
 test('allows an unauthenticated visitor to use auth screens and sends signed-in users to the app', () => {
   assert.deepEqual(authRouteState({ loading: false, configured: false, user: null, pathname: '/register' }), { view: 'auth', mode: 'register', configured: false });
   assert.deepEqual(authRouteState({ loading: false, configured: true, user: { uid: 'uid-1' }, pathname: '/login' }), { view: 'redirect-workspace' });
